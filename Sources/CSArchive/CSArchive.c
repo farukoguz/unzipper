@@ -65,6 +65,8 @@ unsigned int archive_entry_filetype(struct archive_entry *);
 const char *archive_entry_symlink(struct archive_entry *);
 const char *archive_entry_hardlink(struct archive_entry *);
 int archive_entry_is_encrypted(struct archive_entry *);
+/* The set variants only store the pointer, so the caller must keep the buffer
+   alive until archive_write_header() has consumed the entry. */
 void archive_entry_set_pathname(struct archive_entry *, const char *);
 void archive_entry_set_hardlink(struct archive_entry *, const char *);
 
@@ -124,6 +126,13 @@ static char *dup_string(const char *value) {
 }
 
 void uz_free_string(char *string) { free(string); }
+
+static void free_string_out(char **out) {
+    if (out && *out) {
+        uz_free_string(*out);
+        *out = NULL;
+    }
+}
 
 char *uz_normalize_path(const char *path) {
     if (!path) return dup_string("");
@@ -186,6 +195,40 @@ static int selected_index(const int *indices, int count, int index) {
         if (indices[mid] < index) lo = mid + 1;
         else hi = mid - 1;
     }
+    return 0;
+}
+
+/* Returns 1 when an existing non-directory object blocks one of the path's
+   parent folders. Used when overwriting is disabled so nested entries are
+   skipped instead of failing or replacing the existing object. */
+static int has_blocked_ancestor(const char *resolved_dest, const char *path) {
+    size_t dest_len = strlen(resolved_dest);
+    size_t path_len = strlen(path);
+    char *candidate = malloc(dest_len + path_len + 2);
+    if (!candidate) return 0;
+
+    memcpy(candidate, resolved_dest, dest_len);
+    candidate[dest_len] = '/';
+    size_t pos = dest_len + 1;
+
+    for (size_t i = 0; i < path_len; i++) {
+        char c = path[i];
+        candidate[pos++] = c;
+        if (c != '/') continue;
+
+        size_t end = pos - 1; /* leave the slash out of the lookup */
+        if (end <= dest_len + 1) continue;
+        candidate[end] = '\0';
+        struct stat st;
+        int exists = (lstat(candidate, &st) == 0);
+        candidate[end] = '/';
+        if (exists && !S_ISDIR(st.st_mode)) {
+            free(candidate);
+            return 1;
+        }
+    }
+
+    free(candidate);
     return 0;
 }
 
@@ -260,6 +303,8 @@ int uz_list(const char *path,
             if (!grown) {
                 set_error(error, "Out of memory.");
                 uz_free_entries(entries, count);
+                free_string_out(out_format);
+                free_string_out(out_filter);
                 archive_read_free(a);
                 return UZ_ERR;
             }
@@ -271,6 +316,8 @@ int uz_list(const char *path,
         if (!normalized) {
             set_error(error, "Out of memory.");
             uz_free_entries(entries, count);
+            free_string_out(out_format);
+            free_string_out(out_filter);
             archive_read_free(a);
             return UZ_ERR;
         }
@@ -295,6 +342,8 @@ int uz_list(const char *path,
     if (r != ARCHIVE_EOF && r != ARCHIVE_OK && r != ARCHIVE_WARN) {
         set_error(error, "%s", archive_error_string(a) ?: "Failed while reading archive.");
         uz_free_entries(entries, count);
+        free_string_out(out_format);
+        free_string_out(out_filter);
         archive_read_free(a);
         return UZ_ERR;
     }
@@ -420,7 +469,12 @@ int uz_extract(const char *archive_path,
         struct stat st;
         int exists = (lstat(full, &st) == 0);
         int is_dir_entry = (archive_entry_filetype(entry) == AE_IFDIR);
-        if (exists && !overwrite && !is_dir_entry) {
+        int existing_is_dir = exists && S_ISDIR(st.st_mode);
+        /* Never replace a real file with a directory (or vice versa) when the
+           caller asked us not to overwrite. */
+        int skip_existing = exists && !overwrite && !(is_dir_entry && existing_is_dir);
+        int blocked_ancestor = !overwrite && has_blocked_ancestor(resolved_dest, normalized);
+        if (skip_existing || blocked_ancestor) {
             done += archive_entry_size_is_set(entry) ? archive_entry_size(entry) : 0;
             archive_read_data_skip(a);
             entries_done++;
@@ -431,18 +485,39 @@ int uz_extract(const char *archive_path,
         }
 
         archive_entry_set_pathname(entry, full);
+        char *hardlink_target = NULL;
         const char *hardlink = archive_entry_hardlink(entry);
         if (hardlink) {
             char *target = uz_normalize_path(hardlink);
-            if (target && target[0]) {
-                size_t target_len = strlen(resolved_dest) + strlen(target) + 2;
-                char *full_target = malloc(target_len);
-                if (full_target) {
-                    snprintf(full_target, target_len, "%s/%s", resolved_dest, target);
-                    archive_entry_set_hardlink(entry, full_target);
-                    free(full_target);
-                }
+            if (!target) {
+                set_error(error, "Out of memory.");
+                free(full);
+                free(normalized);
+                failed = 1;
+                break;
             }
+            if (target[0] == '\0') {
+                set_error(error, "Archive contains a link with an unsafe target.");
+                free(target);
+                free(full);
+                free(normalized);
+                failed = 1;
+                break;
+            }
+            size_t target_len = strlen(resolved_dest) + strlen(target) + 2;
+            hardlink_target = malloc(target_len);
+            if (!hardlink_target) {
+                set_error(error, "Out of memory.");
+                free(target);
+                free(full);
+                free(normalized);
+                failed = 1;
+                break;
+            }
+            snprintf(hardlink_target, target_len, "%s/%s", resolved_dest, target);
+            /* archive_entry_set_hardlink stores the pointer, so keep the
+               buffer alive until after archive_write_header(). */
+            archive_entry_set_hardlink(entry, hardlink_target);
             free(target);
         }
 
@@ -451,6 +526,7 @@ int uz_extract(const char *archive_path,
             set_error(error, "%s%s", archive_error_string(disk) ?: "Could not write file.",
                       "");
             failed = 1;
+            free(hardlink_target);
             free(full);
             free(normalized);
             break;
@@ -494,6 +570,7 @@ int uz_extract(const char *archive_path,
         }
 
         if (failed || cancelled) {
+            free(hardlink_target);
             free(full);
             free(normalized);
             if (cancelled) break;
@@ -503,12 +580,14 @@ int uz_extract(const char *archive_path,
         if (archive_write_finish_entry(disk) < ARCHIVE_WARN) {
             set_error(error, "%s", archive_error_string(disk) ?: "Could not finish writing file.");
             failed = 1;
+            free(hardlink_target);
             free(full);
             free(normalized);
             break;
         }
 
         entries_done++;
+        free(hardlink_target);
         free(full);
         free(normalized);
         ordinal++;
@@ -648,15 +727,17 @@ static int write_entry_header(UZWriter *writer,
     }
 
     size_t nlen = strlen(normalized);
+    char *with_slash = NULL;
     if (filetype == AE_IFDIR) {
         if (nlen == 0) { free(normalized); archive_entry_free(entry); return UZ_OK; }
-        char *with_slash = malloc(nlen + 2);
+        with_slash = malloc(nlen + 2);
         if (!with_slash) { free(normalized); archive_entry_free(entry); return UZ_ERR; }
         memcpy(with_slash, normalized, nlen);
         with_slash[nlen] = '/';
         with_slash[nlen + 1] = '\0';
+        /* Kept alive until archive_write_header() because the entry stores
+           the pointer rather than copying the string. */
         archive_entry_set_pathname(entry, with_slash);
-        free(with_slash);
     } else {
         archive_entry_set_pathname(entry, normalized);
     }
@@ -673,6 +754,7 @@ static int write_entry_header(UZWriter *writer,
 
     int rc = archive_write_header(writer->a, entry);
     if (rc < ARCHIVE_WARN) {
+        free(with_slash);
         archive_entry_free(entry);
         free(normalized);
         return UZ_ERR;
@@ -680,6 +762,7 @@ static int write_entry_header(UZWriter *writer,
     if (filetype == AE_IFDIR) {
         archive_write_finish_entry(writer->a);
     }
+    free(with_slash);
     archive_entry_free(entry);
     free(normalized);
     return UZ_OK;

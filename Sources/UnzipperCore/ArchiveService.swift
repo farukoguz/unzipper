@@ -1,4 +1,5 @@
 import CSArchive
+import Darwin
 import Foundation
 
 public struct ExtractionRequest: Sendable {
@@ -65,16 +66,16 @@ public enum ArchiveService {
             return uz_list(path, &rawEntries, &count, &formatPtr, &filterPtr, &errorPtr)
         }
 
-        if result != Int32(UZ_OK) {
-            throw ArchiveError.message(takeError(errorPtr) ?? "The archive could not be opened.")
-        }
-        _ = takeError(errorPtr)
-
         defer {
             uz_free_entries(rawEntries, count)
             if let formatPtr { uz_free_string(formatPtr) }
             if let filterPtr { uz_free_string(filterPtr) }
         }
+
+        if result != Int32(UZ_OK) {
+            throw ArchiveError.message(takeError(errorPtr) ?? "The archive could not be opened.")
+        }
+        _ = takeError(errorPtr)
 
         let formatName = formatPtr.map { String(cString: $0) } ?? "Archive"
         let filterName = filterPtr.map { String(cString: $0) } ?? "none"
@@ -110,8 +111,8 @@ public enum ArchiveService {
             }
         }
 
-        let totalSize = entries.reduce(Int64(0)) { $0 + $1.size }
         let files = entries.filter { !$0.isDirectory }
+        let totalSize = files.reduce(Int64(0)) { $0 + $1.size }
         let totalCompressed: Int64? = {
             guard !packedSizes.isEmpty, !files.isEmpty else { return nil }
             var sum: Int64 = 0
@@ -239,7 +240,19 @@ public enum ArchiveService {
         var errorPtr: UnsafeMutablePointer<CChar>?
         let cProgress = makeCProgress(relay)
 
-        let writer: OpaquePointer? = request.destination.withUnsafeFileSystemRepresentation { path in
+        // Build into a sibling temporary file and rename it into place only
+        // after the archive has been finalized. Opening the destination
+        // directly would truncate an existing archive before the user's
+        // cancelled or failed attempt had a chance to preserve it.
+        let fileManager = FileManager.default
+        let destination = request.destination
+        let temporaryURL = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
+        func discardTemporaryArchive() {
+            try? fileManager.removeItem(at: temporaryURL)
+        }
+
+        let writer: OpaquePointer? = temporaryURL.withUnsafeFileSystemRepresentation { path in
             guard let path else { return nil }
             return uz_writer_open(path,
                                   request.format.identifier,
@@ -251,7 +264,9 @@ public enum ArchiveService {
         }
 
         guard let writer else {
-            throw ArchiveError.message(takeError(errorPtr) ?? "Could not create the archive.")
+            let message = takeError(errorPtr) ?? "Could not create the archive."
+            discardTemporaryArchive()
+            throw ArchiveError.message(message)
         }
         _ = takeError(errorPtr)
 
@@ -259,6 +274,7 @@ public enum ArchiveService {
         for item in planned.items {
             if cancelFlag.isCancelled {
                 uz_writer_abort(writer)
+                discardTemporaryArchive()
                 throw ArchiveError.cancelled
             }
             let rc: Int32 = item.diskURL.withUnsafeFileSystemRepresentation { diskPath in
@@ -269,6 +285,7 @@ public enum ArchiveService {
             }
             if rc == Int32(UZ_ERR_CANCELLED) {
                 uz_writer_abort(writer)
+                discardTemporaryArchive()
                 throw ArchiveError.cancelled
             }
             if rc != Int32(UZ_OK) {
@@ -280,15 +297,31 @@ public enum ArchiveService {
         let addError = takeError(errorPtr)
         if failed {
             uz_writer_abort(writer)
+            discardTemporaryArchive()
             throw ArchiveError.message(addError ?? "Could not add a file to the archive.")
         }
 
         if uz_writer_close(writer, &errorPtr) != Int32(UZ_OK) {
             let closeError = takeError(errorPtr)
+            discardTemporaryArchive()
             throw ArchiveError.message(closeError ?? "Could not finish the archive.")
         }
         _ = takeError(errorPtr)
 
-        return request.destination
+        let renameError: Int32 = temporaryURL.withUnsafeFileSystemRepresentation { temporaryPath in
+            guard let temporaryPath else { return Int32(EINVAL) }
+            return destination.withUnsafeFileSystemRepresentation { destinationPath in
+                guard let destinationPath else { return Int32(EINVAL) }
+                if rename(temporaryPath, destinationPath) == 0 { return 0 }
+                return Int32(errno)
+            }
+        }
+        if renameError != 0 {
+            let message = String(cString: strerror(renameError))
+            discardTemporaryArchive()
+            throw ArchiveError.message("Could not save the archive: \(message)")
+        }
+
+        return destination
     }
 }

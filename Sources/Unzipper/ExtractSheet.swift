@@ -13,7 +13,6 @@ struct ExtractSheet: View {
     @State private var revealInFinder = true
     @State private var password = ""
     @State private var job: ExtractionJob?
-    @State private var destinationIsCustom = false
 
     init(context: ExtractSheetContext) {
         self.context = context
@@ -121,7 +120,6 @@ struct ExtractSheet: View {
                 Button {
                     destination = context.archiveURL.deletingLastPathComponent()
                         .appendingPathComponent(Self.stem(for: context.archiveName), isDirectory: true)
-                    destinationIsCustom = false
                 } label: {
                     Label("New folder", systemImage: "folder.badge.plus")
                 }
@@ -129,7 +127,6 @@ struct ExtractSheet: View {
 
                 Button {
                     destination = context.archiveURL.deletingLastPathComponent()
-                    destinationIsCustom = false
                 } label: {
                     Label("Archive folder", systemImage: "folder")
                 }
@@ -163,7 +160,6 @@ struct ExtractSheet: View {
         panel.directoryURL = destination.deletingLastPathComponent()
         if panel.runModal() == .OK, let url = panel.url {
             destination = url
-            destinationIsCustom = true
         }
     }
 

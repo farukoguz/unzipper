@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import UnzipperCore
 import UniformTypeIdentifiers
-import UnzipperCore
 
 struct CreateArchiveSheet: View {
     let context: CreateSheetContext
@@ -310,6 +309,7 @@ struct CreateArchiveSheet: View {
     }
 
     private func startJob(destination: URL) {
+        pendingDestination = nil
         let unique = uniqueItems(items)
         guard !unique.isEmpty else { return }
         let newJob = CreationJob(items: unique,
@@ -484,9 +484,12 @@ struct CreateArchiveSheet: View {
 
     private func append(_ urls: [URL]) {
         let wasEmpty = items.isEmpty
-        let existing = Set(items.map { $0.standardizedFileURL })
-        for url in urls where !existing.contains(url.standardizedFileURL) {
-            items.append(url.standardizedFileURL)
+        var existing = Set(items.map { $0.standardizedFileURL })
+        for url in urls {
+            let standardized = url.standardizedFileURL
+            if existing.insert(standardized).inserted {
+                items.append(standardized)
+            }
         }
         if wasEmpty, let first = items.first {
             parentDirectory = first.deletingLastPathComponent()

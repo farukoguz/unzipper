@@ -96,4 +96,14 @@ final class ArchiveBrowserTests: XCTestCase {
                              isEncrypted: false, entryIndex: 1, locale: locale)
         XCTAssertEqual(row.sortRatio, 0.75, accuracy: 0.0001)
     }
+
+    func testDuplicateEntryPathsProduceOneRow() {
+        let duplicate = ArchiveIndex(entries: [
+            TestSupport.entry(id: 0, path: "same.txt", size: 1),
+            TestSupport.entry(id: 1, path: "same.txt", size: 2)
+        ])
+        let rows = ArchiveBrowser.rows(in: "", index: duplicate, locale: locale)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.entryIndex, 0)
+    }
 }
