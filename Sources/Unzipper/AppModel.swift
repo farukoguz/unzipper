@@ -1,95 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
-import UniformTypeIdentifiers
 import UnzipperCore
-
-struct BrowserRow: Identifiable, Hashable {
-    let id: String
-    let path: String
-    let name: String
-    let isDirectory: Bool
-    let size: Int64
-    let packedSize: Int64?
-    let modified: Date?
-    let isEncrypted: Bool
-    let entryIndex: Int?
-    let sortName: String
-    let sortSize: Int64
-    let sortPacked: Int64
-    let sortRatio: Double
-    let sortModified: Date
-
-    init(path: String,
-         name: String,
-         isDirectory: Bool,
-         size: Int64,
-         packedSize: Int64?,
-         modified: Date?,
-         isEncrypted: Bool,
-         entryIndex: Int?) {
-        self.id = path
-        self.path = path
-        self.name = name
-        self.isDirectory = isDirectory
-        self.size = size
-        self.packedSize = packedSize
-        self.modified = modified
-        self.isEncrypted = isEncrypted
-        self.entryIndex = entryIndex
-        self.sortName = name.folding(options: [.caseInsensitive, .diacriticInsensitive],
-                                     locale: .current)
-        self.sortSize = size
-        self.sortPacked = packedSize ?? 0
-        self.sortRatio = (packedSize != nil && size > 0) ? 1 - (Double(packedSize!) / Double(size)) : -1
-        self.sortModified = modified ?? .distantPast
-    }
-}
-
-struct ExtractSheetContext: Identifiable {
-    let id = UUID()
-    let archiveURL: URL
-    let archiveName: String
-    let indices: [Int]
-    let totalEntries: Int
-    let totalBytes: Int64
-    let containsEncrypted: Bool
-    let selectionLabel: String
-}
-
-struct CreateSheetContext: Identifiable {
-    let id = UUID()
-    let items: [URL]
-}
-
-struct PreviewItem: Identifiable {
-    let id = UUID()
-    let url: URL
-    let title: String
-    let subtitle: String
-    let tempDirectory: URL
-}
-
-enum FileIcons {
-    private static let folder = NSWorkspace.shared.icon(for: .folder)
-    private static let generic = NSWorkspace.shared.icon(for: .data)
-    private static var cache: [String: NSImage] = [:]
-
-    static func icon(name: String, isDirectory: Bool) -> NSImage {
-        if isDirectory { return folder }
-        let ext = (name as NSString).pathExtension.lowercased()
-        if ext.isEmpty { return generic }
-        if let cached = cache[ext] { return cached }
-        let type = UTType(filenameExtension: ext) ?? .data
-        let image = NSWorkspace.shared.icon(for: type)
-        cache[ext] = image
-        return image
-    }
-
-    static func archiveIcon() -> NSImage {
-        NSWorkspace.shared.icon(for: .zip)
-    }
-}
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -97,12 +9,12 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var archiveURL: URL?
     @Published private(set) var listing: ArchiveListing?
-    @Published private(set) var rows: [BrowserRow] = []
+    @Published private(set) var rows: [ArchiveRow] = []
     @Published private(set) var currentPath = ""
     @Published private(set) var isLoading = false
     @Published var selection = Set<String>()
     @Published var searchText = "" { didSet { if searchText != oldValue { selection.removeAll(); rebuildRows() } } }
-    @Published var sortOrder: [KeyPathComparator<BrowserRow>] = [KeyPathComparator(\BrowserRow.sortName)] {
+    @Published var sortOrder: [KeyPathComparator<ArchiveRow>] = [KeyPathComparator(\ArchiveRow.sortName)] {
         didSet { rebuildRows() }
     }
     @Published var extractContext: ExtractSheetContext?
@@ -116,20 +28,11 @@ final class AppModel: ObservableObject {
 
     private(set) var lastPassword: String?
     private var loadToken = UUID()
-    private var allEntries: [ArchiveEntry] = []
-    private var entryByID: [Int: ArchiveEntry] = [:]
-    private var folderChildren: [String: Set<String>] = [:]
-    private var filesByParent: [String: [ArchiveEntry]] = [:]
-    private var folderSizes: [String: Int64] = [:]
-    private var folderFileCounts: [String: Int] = [:]
-    private var explicitFolders: [String: ArchiveEntry] = [:]
+    private var index = ArchiveIndex(entries: [])
     private var previewTempDirectory: URL?
 
     private static let recentsKey = "Unzipper.RecentArchives"
-    private static let archiveExtensions: Set<String> = [
-        "zip", "zipx", "rar", "7z", "tar", "gz", "tgz", "bz2", "tbz", "tbz2",
-        "xz", "txz", "cab", "iso", "jar"
-    ]
+    private static let recentLimit = 8
 
     init() {
         loadRecents()
@@ -137,29 +40,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - Loading
 
-    static func looksLikeArchive(_ url: URL) -> Bool {
-        archiveExtensions.contains(url.pathExtension.lowercased())
-    }
-
     func open(_ url: URL) {
         let standardized = url.standardizedFileURL
         let token = UUID()
         loadToken = token
-        isLoading = true
         archiveURL = standardized
-        listing = nil
-        allEntries = []
-        entryByID = [:]
-        folderChildren = [:]
-        filesByParent = [:]
-        folderSizes = [:]
-        folderFileCounts = [:]
-        explicitFolders = [:]
-        rows = []
-        currentPath = ""
-        selection.removeAll()
-        searchText = ""
-        lastPassword = nil
+        resetLoadedState()
+        isLoading = true
 
         Task {
             do {
@@ -177,12 +64,7 @@ final class AppModel: ObservableObject {
 
     private func apply(_ result: ArchiveListing) {
         listing = result
-        allEntries = result.entries
-        entryByID = Dictionary(uniqueKeysWithValues: result.entries.map { ($0.id, $0) })
-        buildIndex()
-        currentPath = ""
-        selection.removeAll()
-        searchText = ""
+        index = ArchiveIndex(entries: result.entries)
         isLoading = false
         rebuildRows()
         addRecent(result.url)
@@ -191,14 +73,12 @@ final class AppModel: ObservableObject {
     func closeArchive() {
         loadToken = UUID()
         archiveURL = nil
+        resetLoadedState()
+    }
+
+    private func resetLoadedState() {
         listing = nil
-        allEntries = []
-        entryByID = [:]
-        folderChildren = [:]
-        filesByParent = [:]
-        folderSizes = [:]
-        folderFileCounts = [:]
-        explicitFolders = [:]
+        index = ArchiveIndex(entries: [])
         rows = []
         currentPath = ""
         selection.removeAll()
@@ -220,118 +100,17 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: - Indexing
-
-    private func buildIndex() {
-        folderChildren.removeAll(keepingCapacity: true)
-        filesByParent.removeAll(keepingCapacity: true)
-        folderSizes.removeAll(keepingCapacity: true)
-        folderFileCounts.removeAll(keepingCapacity: true)
-        explicitFolders.removeAll(keepingCapacity: true)
-
-        for entry in allEntries {
-            // Archives are not required to contain directory entries, so create the
-            // folder chain implied by every entry path.
-            ensureAncestors(of: entry.path)
-
-            if entry.isDirectory {
-                explicitFolders[entry.path] = entry
-                let parent = entry.parent
-                folderChildren[parent, default: []].insert(entry.path)
-            }
-
-            var folder = entry.parent
-            var ancestors: [String] = []
-            while true {
-                ancestors.append(folder)
-                if folder.isEmpty { break }
-                let pieces = folder.split(separator: "/", omittingEmptySubsequences: true)
-                folder = pieces.dropLast().joined(separator: "/")
-                if pieces.isEmpty { break }
-            }
-
-            for ancestor in ancestors {
-                folderSizes[ancestor, default: 0] += entry.size
-                if !entry.isDirectory {
-                    folderFileCounts[ancestor, default: 0] += 1
-                }
-            }
-
-            if !entry.isDirectory {
-                filesByParent[entry.parent, default: []].append(entry)
-            }
-        }
-    }
-
-    private func ensureAncestors(of path: String) {
-        var pieces = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        guard !pieces.isEmpty else { return }
-        pieces.removeLast()
-        var parent = ""
-        for piece in pieces {
-            let child = parent.isEmpty ? piece : parent + "/" + piece
-            folderChildren[parent, default: []].insert(child)
-            parent = child
-        }
-    }
-
     // MARK: - Rows
 
     private func rebuildRows() {
-        guard listing != nil else { rows = []; return }
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        var result: [BrowserRow] = []
-
-        if query.isEmpty {
-            for folderPath in folderChildren[currentPath] ?? [] {
-                let name = folderPath.split(separator: "/").last.map(String.init) ?? folderPath
-                let entry = explicitFolders[folderPath]
-                result.append(BrowserRow(path: folderPath,
-                                         name: name,
-                                         isDirectory: true,
-                                         size: folderSizes[folderPath] ?? 0,
-                                         packedSize: nil,
-                                         modified: entry?.modified,
-                                         isEncrypted: false,
-                                         entryIndex: entry?.id))
-            }
-            for entry in filesByParent[currentPath] ?? [] {
-                result.append(BrowserRow(path: entry.path,
-                                         name: entry.name,
-                                         isDirectory: false,
-                                         size: entry.size,
-                                         packedSize: entry.compressedSize,
-                                         modified: entry.modified,
-                                         isEncrypted: entry.isEncrypted,
-                                         entryIndex: entry.id))
-            }
-        } else {
-            for entry in allEntries {
-                guard entry.path.localizedCaseInsensitiveContains(query) else { continue }
-                result.append(BrowserRow(path: entry.path,
-                                         name: entry.path,
-                                         isDirectory: entry.isDirectory,
-                                         size: entry.isDirectory ? (folderSizes[entry.path] ?? 0) : entry.size,
-                                         packedSize: entry.compressedSize,
-                                         modified: entry.modified,
-                                         isEncrypted: entry.isEncrypted,
-                                         entryIndex: entry.id))
-            }
-            for folderPath in folderChildren.keys where !folderPath.isEmpty {
-                guard !explicitFolders.keys.contains(folderPath),
-                      folderPath.localizedCaseInsensitiveContains(query) else { continue }
-                result.append(BrowserRow(path: folderPath,
-                                         name: folderPath,
-                                         isDirectory: true,
-                                         size: folderSizes[folderPath] ?? 0,
-                                         packedSize: nil,
-                                         modified: nil,
-                                         isEncrypted: false,
-                                         entryIndex: nil))
-            }
+        guard listing != nil else {
+            rows = []
+            return
         }
-
-        rows = result.sorted(using: sortOrder)
+        rows = ArchiveBrowser.rows(in: currentPath,
+                                   index: index,
+                                   query: searchText,
+                                   sortOrder: sortOrder)
     }
 
     func navigate(to path: String) {
@@ -343,8 +122,7 @@ final class AppModel: ObservableObject {
 
     func goUp() {
         guard !currentPath.isEmpty else { return }
-        let pieces = currentPath.split(separator: "/", omittingEmptySubsequences: true)
-        navigate(to: pieces.dropLast().joined(separator: "/"))
+        navigate(to: ArchivePath.parent(of: currentPath))
     }
 
     func activate(_ ids: Set<String>) {
@@ -357,9 +135,8 @@ final class AppModel: ObservableObject {
     }
 
     func openSelection() {
-        if let row = rows.first(where: { selection.contains($0.id) }) {
-            if row.isDirectory { navigate(to: row.path) } else { preview(row) }
-        }
+        guard let row = rows.first(where: { selection.contains($0.id) }) else { return }
+        if row.isDirectory { navigate(to: row.path) } else { preview(row) }
     }
 
     // MARK: - Status
@@ -370,38 +147,32 @@ final class AppModel: ObservableObject {
 
     var windowSubtitle: String {
         guard let listing else { return "Open or drop an archive" }
-        let count = listing.entries.filter { !$0.isDirectory }.count
-        return "\(listing.displayFormat) · \(Formatting.items(count))"
+        return "\(listing.displayFormat) · \(Formatting.items(index.totalFileCount))"
     }
 
     var breadcrumb: [(title: String, path: String)] {
         var items: [(String, String)] = [(archiveURL?.lastPathComponent ?? "Archive", "")]
-        guard !currentPath.isEmpty else { return items }
-        var path = ""
-        for piece in currentPath.split(separator: "/") {
-            path = path.isEmpty ? String(piece) : path + "/" + piece
-            items.append((String(piece), path))
-        }
+        items.append(contentsOf: ArchivePath.breadcrumbs(for: currentPath))
         return items
     }
 
     var currentFileCount: Int {
-        filesByParent[currentPath]?.count ?? 0
+        index.files(in: currentPath).count
     }
 
     var currentFolderCount: Int {
-        folderChildren[currentPath]?.count ?? 0
+        index.children(of: currentPath).count
     }
 
     var currentFolderSize: Int64 {
-        folderSizes[currentPath] ?? 0
+        index.folderSize(currentPath)
     }
 
     var totalEntryCount: Int {
-        allEntries.filter { !$0.isDirectory }.count
+        index.totalFileCount
     }
 
-    var selectedRows: [BrowserRow] {
+    var selectedRows: [ArchiveRow] {
         rows.filter { selection.contains($0.id) }
     }
 
@@ -445,15 +216,16 @@ final class AppModel: ObservableObject {
         guard !selected.isEmpty else { NSSound.beep(); return }
         let indices = entryIndices(for: selected)
         guard !indices.isEmpty else { NSSound.beep(); return }
-        let label = selected.count == 1 ? (selected[0].isDirectory ? "folder “\(selected[0].name)”" : "“\(selected[0].name)”")
-                                       : Formatting.items(selected.count)
+        let label = selected.count == 1
+            ? (selected[0].isDirectory ? "folder “\(selected[0].name)”" : "“\(selected[0].name)”")
+            : Formatting.items(selected.count)
         presentExtraction(indices: indices, archiveURL: archiveURL, label: label)
     }
 
     private func presentExtraction(indices: [Int], archiveURL: URL, label: String) {
         guard !indices.isEmpty else { NSSound.beep(); return }
-        let bytes = indices.reduce(Int64(0)) { $0 + (entryByID[$1]?.size ?? 0) }
-        let encrypted = indices.contains { entryByID[$0]?.isEncrypted == true }
+        let bytes = indices.reduce(Int64(0)) { $0 + (index.entry(withID: $1)?.size ?? 0) }
+        let encrypted = indices.contains { index.entry(withID: $0)?.isEncrypted == true }
         extractContext = ExtractSheetContext(archiveURL: archiveURL,
                                              archiveName: archiveURL.lastPathComponent,
                                              indices: indices,
@@ -463,19 +235,8 @@ final class AppModel: ObservableObject {
                                              selectionLabel: label)
     }
 
-    func entryIndices(for rows: [BrowserRow]) -> [Int] {
-        var result = Set<Int>()
-        for row in rows {
-            if row.isDirectory {
-                let prefix = row.path + "/"
-                for entry in allEntries where entry.path == row.path || entry.path.hasPrefix(prefix) {
-                    result.insert(entry.id)
-                }
-            } else if let index = row.entryIndex {
-                result.insert(index)
-            }
-        }
-        return result.sorted()
+    func entryIndices(for rows: [ArchiveRow]) -> [Int] {
+        index.indices(for: rows)
     }
 
     func noteExtraction(password: String?) {
@@ -484,9 +245,9 @@ final class AppModel: ObservableObject {
 
     // MARK: - Preview
 
-    func preview(_ row: BrowserRow) {
+    func preview(_ row: ArchiveRow) {
         guard !row.isDirectory,
-              let entry = row.entryIndex.flatMap({ entryByID[$0] }),
+              let entry = row.entryIndex.flatMap({ index.entry(withID: $0) }),
               let archiveURL else { return }
         if entry.isEncrypted, lastPassword == nil {
             alertMessage = "“\(entry.name)” is encrypted. Use Extract to enter its password first, then preview it."
@@ -575,9 +336,9 @@ final class AppModel: ObservableObject {
 
     func handleDrop(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        if urls.count == 1, Self.looksLikeArchive(urls[0]) {
+        if urls.count == 1, ArchiveFileTypes.isArchive(urls[0]) {
             open(urls[0])
-        } else if urls.allSatisfy({ Self.looksLikeArchive($0) }) {
+        } else if urls.allSatisfy(ArchiveFileTypes.isArchive) {
             open(urls[0])
         } else {
             presentNewArchive(items: urls)
@@ -588,20 +349,26 @@ final class AppModel: ObservableObject {
 
     private func loadRecents() {
         let paths = UserDefaults.standard.stringArray(forKey: Self.recentsKey) ?? []
-        recents = paths.map(URL.init(fileURLWithPath:)).filter {
-            FileManager.default.fileExists(atPath: $0.path)
-        }
+        let stored = RecentArchives(urls: paths.map(URL.init(fileURLWithPath:)),
+                                     limit: Self.recentLimit).urls
+        recents = stored.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private func addRecent(_ url: URL) {
-        var updated = recents.filter { $0.standardizedFileURL != url.standardizedFileURL }
-        updated.insert(url.standardizedFileURL, at: 0)
-        recents = Array(updated.prefix(8))
-        UserDefaults.standard.set(recents.map(\.path), forKey: Self.recentsKey)
+        var store = RecentArchives(urls: recents, limit: Self.recentLimit)
+        store.add(url)
+        recents = store.urls
+        persistRecents()
     }
 
     func removeRecent(_ url: URL) {
-        recents.removeAll { $0.standardizedFileURL == url.standardizedFileURL }
+        var store = RecentArchives(urls: recents, limit: Self.recentLimit)
+        store.remove(url)
+        recents = store.urls
+        persistRecents()
+    }
+
+    private func persistRecents() {
         UserDefaults.standard.set(recents.map(\.path), forKey: Self.recentsKey)
     }
 
@@ -618,61 +385,5 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_200_000_000)
             if toast == text { toast = nil }
         }
-    }
-}
-
-enum Formatting {
-    private static let byteFormatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowedUnits = [.useAll]
-        formatter.includesUnit = true
-        formatter.isAdaptive = true
-        return formatter
-    }()
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
-    static func size(_ bytes: Int64?) -> String {
-        guard let bytes else { return "—" }
-        if bytes == 0 { return "Zero bytes" }
-        return byteFormatter.string(fromByteCount: bytes)
-    }
-
-    static func compactSize(_ bytes: Int64?) -> String {
-        guard let bytes else { return "—" }
-        if bytes == 0 { return "0" }
-        return byteFormatter.string(fromByteCount: bytes)
-    }
-
-    static func ratio(_ size: Int64, _ packed: Int64?) -> String {
-        guard let packed, size > 0, packed > 0 else { return "—" }
-        let percent = max(0, (1 - (Double(packed) / Double(size))) * 100)
-        return String(format: "%.0f%%", percent)
-    }
-
-    static let tableDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter
-    }()
-
-    static func tableDate(_ date: Date?) -> String {
-        guard let date else { return "—" }
-        return tableDateFormatter.string(from: date)
-    }
-
-    static func items(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "item" : "items")"
-    }
-
-    static func date(_ date: Date?) -> String {
-        guard let date else { return "—" }
-        return dateFormatter.string(from: date)
     }
 }

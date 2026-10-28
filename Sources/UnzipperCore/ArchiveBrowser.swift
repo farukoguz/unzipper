@@ -1,0 +1,133 @@
+import Foundation
+
+/// One row in the archive browser. Sort keys are precomputed so SwiftUI's table
+/// can sort without touching archive state.
+public struct ArchiveRow: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let path: String
+    public let name: String
+    public let isDirectory: Bool
+    public let size: Int64
+    public let packedSize: Int64?
+    public let modified: Date?
+    public let isEncrypted: Bool
+    public let entryIndex: Int?
+    public let sortName: String
+    public let sortSize: Int64
+    public let sortPacked: Int64
+    public let sortRatio: Double
+    public let sortModified: Date
+
+    public init(path: String,
+                name: String,
+                isDirectory: Bool,
+                size: Int64,
+                packedSize: Int64?,
+                modified: Date?,
+                isEncrypted: Bool,
+                entryIndex: Int?,
+                locale: Locale = .current) {
+        self.id = path
+        self.path = path
+        self.name = name
+        self.isDirectory = isDirectory
+        self.size = size
+        self.packedSize = packedSize
+        self.modified = modified
+        self.isEncrypted = isEncrypted
+        self.entryIndex = entryIndex
+        self.sortName = name.folding(options: [.caseInsensitive, .diacriticInsensitive],
+                                     locale: locale)
+        self.sortSize = size
+        self.sortPacked = packedSize ?? 0
+        if let packedSize, size > 0 {
+            self.sortRatio = 1 - (Double(packedSize) / Double(size))
+        } else {
+            self.sortRatio = -1
+        }
+        self.sortModified = modified ?? .distantPast
+    }
+}
+
+/// Builds the rows shown for one folder, or across the whole archive while
+/// searching. This is pure apart from Foundation's collation.
+public enum ArchiveBrowser {
+    public static func rows(in folder: String,
+                            index: ArchiveIndex,
+                            query: String = "",
+                            sortOrder: [KeyPathComparator<ArchiveRow>] = [KeyPathComparator(\ArchiveRow.sortName)],
+                            locale: Locale = .current) -> [ArchiveRow] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result: [ArchiveRow] = []
+
+        if trimmed.isEmpty {
+            for folderPath in index.children(of: folder).sorted() {
+                result.append(folderRow(folderPath,
+                                        displayName: ArchivePath.name(of: folderPath),
+                                        index: index,
+                                        locale: locale))
+            }
+            for entry in index.files(in: folder) {
+                result.append(fileRow(entry, displayPath: entry.name, locale: locale))
+            }
+        } else {
+            for entry in index.entries where entry.path.localizedCaseInsensitiveContains(trimmed) {
+                let row = fileRow(entry, displayPath: entry.path, locale: locale)
+                if entry.isDirectory {
+                    result.append(ArchiveRow(path: row.path,
+                                             name: row.name,
+                                             isDirectory: true,
+                                             size: index.folderSize(entry.path),
+                                             packedSize: row.packedSize,
+                                             modified: row.modified,
+                                             isEncrypted: row.isEncrypted,
+                                             entryIndex: row.entryIndex,
+                                             locale: locale))
+                } else {
+                    result.append(row)
+                }
+            }
+
+            for folderPath in index.allFolders.sorted()
+            where index.explicitFolders[folderPath] == nil
+                && folderPath.localizedCaseInsensitiveContains(trimmed) {
+                result.append(folderRow(folderPath,
+                                        displayName: folderPath,
+                                        index: index,
+                                        locale: locale))
+            }
+        }
+
+        return result.sorted(using: sortOrder)
+    }
+
+    private static func folderRow(_ path: String,
+                                  displayName: String,
+                                  index: ArchiveIndex,
+                                  locale: Locale) -> ArchiveRow {
+        let entry = index.folderEntry(at: path)
+        return ArchiveRow(path: path,
+                          name: displayName,
+                          isDirectory: true,
+                          size: index.folderSize(path),
+                          packedSize: nil,
+                          modified: entry?.modified,
+                          isEncrypted: false,
+                          entryIndex: entry?.id,
+                          locale: locale)
+    }
+
+    private static func fileRow(_ entry: ArchiveEntry,
+                                displayPath: String,
+                                locale: Locale) -> ArchiveRow {
+        ArchiveRow(path: entry.path,
+                   name: displayPath,
+                   isDirectory: entry.isDirectory,
+                   size: entry.size,
+                   packedSize: entry.compressedSize,
+                   modified: entry.modified,
+                   isEncrypted: entry.isEncrypted,
+                   entryIndex: entry.id,
+                   locale: locale)
+    }
+}

@@ -20,10 +20,10 @@ let package = Package(
             dependencies: ["UnzipperCore"],
             path: "Sources/Unzipper"
         ),
-        .executableTarget(
-            name: "CoreTest",
+        .testTarget(
+            name: "UnzipperCoreTests",
             dependencies: ["UnzipperCore"],
-            path: "Tests/CoreTest"
+            path: "Tests/UnzipperCoreTests"
         )
     ]
 )

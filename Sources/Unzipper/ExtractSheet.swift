@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UnzipperCore
 
 struct ExtractSheet: View {
     let context: ExtractSheetContext

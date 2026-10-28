@@ -87,6 +87,23 @@ Homebrew packages and no Xcode project.
 open dist/Unzipper.app
 ```
 
+Run the test suite with:
+
+```bash
+swift test                     # 59 tests: core models, ZIP parsing, round trips
+```
+
+The tests use XCTest, which ships with full Xcode rather than the standalone
+Command Line Tools. If `xcode-select -p` points at `/Library/Developer/CommandLineTools`,
+either select Xcode once with `sudo xcode-select -s /Applications/Xcode.app` or run:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
+
+CI runs `swift build` and `swift test` on every push to `main` and every pull
+request.
+
 `build.sh` compiles the SwiftPM product, assembles the `.app` bundle, copies the
 icon and `Info.plist`, and ad-hoc signs the result. To produce the release disk
 image and checksum:
@@ -124,11 +141,14 @@ sorting by clicking column headers, and right-click actions.
 ```
 Sources/
   CSArchive/        C shim over libarchive (list, extract, create)
-  UnzipperCore/     Swift models, ZIP metadata parser, async services
+  UnzipperCore/     Pure models and services:
+                    ArchiveIndex/ArchiveBrowser (browsing), ArchivePath,
+                    RecentArchives, Formatting, ArchiveFileTypes,
+                    ZipMetadata (packed sizes), CreationPlanner,
+                    ArchiveService (async list/extract/create)
   Unzipper/         SwiftUI app (browser, sheets, jobs, Quick Look)
 Tests/
-  CoreTest/         CLI harness for list/extract/create
-  ctest.c           Low-level C engine test
+  UnzipperCoreTests/ XCTest suite for core models and round trips
 Tools/
   GenerateIcon.swift
 ```

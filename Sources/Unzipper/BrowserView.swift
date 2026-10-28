@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UnzipperCore
 
 struct BrowserView: View {
     @EnvironmentObject private var model: AppModel
