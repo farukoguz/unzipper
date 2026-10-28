@@ -1,0 +1,5 @@
+.build/
+dist/
+Resources/Unzipper.iconset/
+*.dSYM/
+.DS_Store
