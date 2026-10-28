@@ -39,25 +39,61 @@ dependencies.
 Reading is provided by the system `libarchive`; RAR creation is intentionally not
 supported.
 
-## Requirements
+## Install
 
-- macOS 14 (Sonoma) or later
-- Xcode Command Line Tools (`xcode-select --install`)
+Download **Unzipper** from
+[Releases](https://github.com/farukoguz/unzipper/releases) and open the disk image.
 
-The app is built with Swift Package Manager and a small C shim over the system
-`libarchive`, so no Homebrew packages or Xcode project are required.
+1. Check the image before opening it — the build is not notarised, so macOS has no
+   way to tell you whether what you downloaded is what was published:
+
+   ```sh
+   shasum -a 256 -c Unzipper-*.dmg.sha256   # run in ~/Downloads
+   ```
+
+   The filename has to match the checksum exactly. A mismatch means the download
+   is truncated or altered — do not open it. The `.sha256` file sits next to the
+   image on the release page.
+2. Drag **Unzipper** onto the **Applications** shortcut, then eject the disk.
+3. Clear the quarantine flag. macOS refuses this unnotarised build before
+   anything inside it gets a chance to run:
+
+   ```sh
+   /usr/bin/xattr -cr /Applications/Unzipper.app
+   ```
+
+   Then launch Unzipper normally.
+
+   This removes macOS's record of where the app came from, so it can no longer
+   warn you about an unnotarised build. Only run it on an app you built yourself
+   or checked against the release checksum.
+
+   Prefer the mouse? Try to open Unzipper once, click **Done** on the warning,
+   then go to System Settings → Privacy & Security and click **Open Anyway** next
+   to the message about Unzipper. (On macOS 14, right-click → **Open** also works;
+   macOS 15 and later removed that shortcut.)
+
+Requires **macOS 14 (Sonoma) or newer**.
 
 ## Build and run
 
+Building needs the Xcode Command Line Tools (`xcode-select --install`), but no
+Homebrew packages and no Xcode project.
+
 ```bash
-./build.sh              # release build + dist/Unzipper.app
-./build.sh debug        # debug build
+./build.sh                     # release build for this Mac + dist/Unzipper.app
+./build.sh debug               # debug build
+./build.sh release --universal # arm64 + x86_64 for distribution
 open dist/Unzipper.app
 ```
 
 `build.sh` compiles the SwiftPM product, assembles the `.app` bundle, copies the
-icon and `Info.plist`, and ad-hoc signs the result. The bundle is self-contained:
-copy `dist/Unzipper.app` to `/Applications` if you like.
+icon and `Info.plist`, and ad-hoc signs the result. To produce the release disk
+image and checksum:
+
+```bash
+Scripts/make-dmg.sh            # dist/Unzipper-<version>.dmg + .sha256
+```
 
 To regenerate the icon:
 
@@ -107,9 +143,9 @@ Tools/
   not browsable; use tar-based `.tar.gz`/`.tgz` archives instead.
 - The app is ad-hoc signed for local use. If you distribute it, sign with a
   Developer ID certificate and notarize it to satisfy Gatekeeper.
-- The release build targets the host architecture by default. For a universal
-  binary, run `swift build -c release --arch arm64 --arch x86_64` and update
-  `build.sh` to point at the resulting product.
+- Local builds target the host architecture by default. The published release is
+  universal: `./build.sh release --universal` builds both slices and combines
+  them with `lipo`.
 
 ## License
 
