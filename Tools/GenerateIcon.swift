@@ -108,7 +108,6 @@ func drawIcon(size: Int) -> Data? {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     context?.imageInterpolation = .high
-    context?.cgContext.scaleBy(x: CGFloat(size) / 1024, y: CGFloat(size) / 1024)
 
     let full = NSRect(x: 0, y: 0, width: 1024, height: 1024)
     let squircle = rounded(full.insetBy(dx: 46, dy: 46), 214)
