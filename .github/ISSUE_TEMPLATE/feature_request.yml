@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a new capability or an improvement to Unzipper.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Check the
+        [README](https://github.com/farukoguz/unzipper#readme) and
+        [existing issues](https://github.com/farukoguz/unzipper/issues) first —
+        the limitation may already be documented or requested.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the workflow or limitation behind the request.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should Unzipper do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other apps, workarounds, or designs you have tried.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, example archives, or links.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This request is about Unzipper, not a general macOS question.
+          required: true

@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a crash, extraction problem, or UI bug in Unzipper.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Check the
+        [latest release](https://github.com/farukoguz/unzipper/releases/latest)
+        first — the problem may already be fixed.
+
+        Please do not post archive passwords or attach archives containing
+        private data. A small synthetic archive that reproduces the problem is
+        ideal.
+  - type: input
+    id: version
+    attributes:
+      label: Unzipper version
+      description: Shown in Unzipper → About Unzipper, or in the disk image filename.
+      placeholder: "1.0.1"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: For example 14.6.1 or 15.2.
+      placeholder: "15.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Mac architecture
+      options:
+        - Apple silicon
+        - Intel
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: format
+    attributes:
+      label: Archive format
+      description: The format involved, if the bug happens while browsing or extracting.
+      placeholder: "ZIP, 7Z, TAR.GZ, RAR…"
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps and, if possible, attach a minimal test archive.
+      placeholder: |
+        1. Open …
+        2. Double-click …
+        3. See …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error message and any crash report if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, logs, or anything else that might help.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I can reproduce this with the latest release.
+          required: true
+        - label: This report contains no passwords or private archive contents.
+          required: true

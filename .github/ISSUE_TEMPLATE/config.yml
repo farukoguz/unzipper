@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Download the latest release
+    url: https://github.com/farukoguz/unzipper/releases/latest
+    about: Check whether a newer version already fixes the problem.
+  - name: Read the README
+    url: https://github.com/farukoguz/unzipper#readme
+    about: Supported formats, installation, keyboard shortcuts, and known limitations.
