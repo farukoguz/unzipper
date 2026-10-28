@@ -91,6 +91,7 @@ final class ExtractionJob: ObservableObject, Identifiable {
     }
 
     private func apply(_ update: ProgressUpdate) {
+        guard phase == .running else { return }
         if update.totalBytes > 0 { totalBytes = update.totalBytes }
         if update.entriesTotal > 0 { entriesTotal = update.entriesTotal }
         processedBytes = update.completedBytes
@@ -193,10 +194,11 @@ final class CreationJob: ObservableObject, Identifiable {
     private func apply(_ update: CreationPhase) {
         switch update {
         case .scanning(let found, let path):
-            if phase != .scanning { phase = .scanning }
+            guard phase == .scanning else { return }
             foundItems = found
             if !path.isEmpty { currentPath = path }
         case .writing(let progress):
+            guard phase == .scanning || phase == .writing else { return }
             phase = .writing
             fraction = progress.fraction
             processedBytes = progress.completedBytes

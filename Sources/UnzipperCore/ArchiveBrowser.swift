@@ -59,46 +59,65 @@ public enum ArchiveBrowser {
                             locale: Locale = .current) -> [ArchiveRow] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var result: [ArchiveRow] = []
+        var seen = Set<String>()
 
         if trimmed.isEmpty {
             for folderPath in index.children(of: folder).sorted() {
-                result.append(folderRow(folderPath,
-                                        displayName: ArchivePath.name(of: folderPath),
-                                        index: index,
-                                        locale: locale))
+                appendUnique(folderRow(folderPath,
+                                       displayName: ArchivePath.name(of: folderPath),
+                                       index: index,
+                                       locale: locale),
+                             to: &result,
+                             seen: &seen)
             }
             for entry in index.files(in: folder) {
-                result.append(fileRow(entry, displayPath: entry.name, locale: locale))
+                appendUnique(fileRow(entry, displayPath: entry.name, locale: locale),
+                             to: &result,
+                             seen: &seen)
             }
         } else {
             for entry in index.entries where entry.path.localizedCaseInsensitiveContains(trimmed) {
                 let row = fileRow(entry, displayPath: entry.path, locale: locale)
                 if entry.isDirectory {
-                    result.append(ArchiveRow(path: row.path,
-                                             name: row.name,
-                                             isDirectory: true,
-                                             size: index.folderSize(entry.path),
-                                             packedSize: row.packedSize,
-                                             modified: row.modified,
-                                             isEncrypted: row.isEncrypted,
-                                             entryIndex: row.entryIndex,
-                                             locale: locale))
+                    appendUnique(ArchiveRow(path: row.path,
+                                            name: row.name,
+                                            isDirectory: true,
+                                            size: index.folderSize(entry.path),
+                                            packedSize: row.packedSize,
+                                            modified: row.modified,
+                                            isEncrypted: row.isEncrypted,
+                                            entryIndex: row.entryIndex,
+                                            locale: locale),
+                                 to: &result,
+                                 seen: &seen)
                 } else {
-                    result.append(row)
+                    appendUnique(row, to: &result, seen: &seen)
                 }
             }
 
             for folderPath in index.allFolders.sorted()
             where index.explicitFolders[folderPath] == nil
                 && folderPath.localizedCaseInsensitiveContains(trimmed) {
-                result.append(folderRow(folderPath,
-                                        displayName: folderPath,
-                                        index: index,
-                                        locale: locale))
+                appendUnique(folderRow(folderPath,
+                                       displayName: folderPath,
+                                       index: index,
+                                       locale: locale),
+                             to: &result,
+                             seen: &seen)
             }
         }
 
         return result.sorted(using: sortOrder)
+    }
+
+    /// Archives can legally contain the same path more than once. SwiftUI's
+    /// table requires stable unique identifiers, so keep the first row only.
+    private static func appendUnique(_ row: ArchiveRow,
+                                     to rows: inout [ArchiveRow],
+                                     seen: inout Set<String>) {
+        if seen.insert(row.id).inserted {
+            rows.append(row)
+        }
     }
 
     private static func folderRow(_ path: String,

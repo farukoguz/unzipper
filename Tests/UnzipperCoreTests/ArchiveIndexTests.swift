@@ -83,4 +83,15 @@ final class ArchiveIndexTests: XCTestCase {
         XCTAssertEqual(empty.folderSize(""), 0)
         XCTAssertEqual(empty.totalFileCount, 0)
     }
+
+    func testFolderSizesIgnoreExplicitDirectoryEntrySizes() {
+        let sized = ArchiveIndex(entries: [
+            TestSupport.entry(id: 0, path: "docs", isDirectory: true, size: 4096),
+            TestSupport.entry(id: 1, path: "docs/a.txt", size: 100),
+            TestSupport.entry(id: 2, path: "docs/sub", isDirectory: true, size: 512)
+        ])
+        XCTAssertEqual(sized.folderSize("docs"), 100)
+        XCTAssertEqual(sized.folderSize("docs/sub"), 0)
+        XCTAssertEqual(sized.folderSize(""), 100)
+    }
 }

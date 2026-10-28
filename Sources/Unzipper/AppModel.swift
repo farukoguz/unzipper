@@ -30,6 +30,9 @@ final class AppModel: ObservableObject {
     private var loadToken = UUID()
     private var index = ArchiveIndex(entries: [])
     private var previewTempDirectory: URL?
+    private var previewTask: Task<Void, Never>?
+    private var previewCancelFlag: CancelFlag?
+    private var previewGeneration = UUID()
 
     private static let recentsKey = "Unzipper.RecentArchives"
     private static let recentLimit = 8
@@ -254,6 +257,8 @@ final class AppModel: ObservableObject {
             return
         }
 
+        cleanupPreview()
+
         let temp = FileManager.default.temporaryDirectory
             .appendingPathComponent("UnzipperPreview-\(UUID().uuidString)", isDirectory: true)
         do {
@@ -263,7 +268,10 @@ final class AppModel: ObservableObject {
             return
         }
 
-        cleanupPreview()
+        let generation = UUID()
+        let cancelFlag = CancelFlag()
+        previewGeneration = generation
+        previewCancelFlag = cancelFlag
         previewTempDirectory = temp
         busyMessage = "Preparing preview…"
 
@@ -274,22 +282,37 @@ final class AppModel: ObservableObject {
                                         password: lastPassword,
                                         overwrite: true,
                                         totalBytes: entry.size)
-        Task {
+        previewTask = Task { [weak self] in
             do {
-                try await ArchiveService.extract(request, cancelFlag: CancelFlag()) { _ in }
-                busyMessage = nil
+                try await ArchiveService.extract(request, cancelFlag: cancelFlag) { _ in }
+                guard let self, self.previewGeneration == generation else {
+                    try? FileManager.default.removeItem(at: temp)
+                    return
+                }
+                self.busyMessage = nil
+                self.previewTask = nil
+                self.previewCancelFlag = nil
                 let extracted = temp.appendingPathComponent(entry.path)
                 guard FileManager.default.fileExists(atPath: extracted.path) else {
                     throw ArchiveError.message("The preview file could not be written.")
                 }
-                previewItem = PreviewItem(url: extracted,
-                                          title: entry.name,
-                                          subtitle: "\(Formatting.size(entry.size)) · \(entry.path)",
-                                          tempDirectory: temp)
+                self.previewItem = PreviewItem(url: extracted,
+                                               title: entry.name,
+                                               subtitle: "\(Formatting.size(entry.size)) · \(entry.path)",
+                                               tempDirectory: temp)
             } catch {
-                busyMessage = nil
-                cleanupPreview()
-                alertMessage = error.localizedDescription
+                guard let self, self.previewGeneration == generation else {
+                    try? FileManager.default.removeItem(at: temp)
+                    return
+                }
+                self.busyMessage = nil
+                self.previewTask = nil
+                self.previewCancelFlag = nil
+                if self.previewTempDirectory == temp {
+                    try? FileManager.default.removeItem(at: temp)
+                    self.previewTempDirectory = nil
+                }
+                self.alertMessage = error.localizedDescription
             }
         }
     }
@@ -322,6 +345,11 @@ final class AppModel: ObservableObject {
     }
 
     func cleanupPreview() {
+        previewCancelFlag?.cancel()
+        previewCancelFlag = nil
+        previewTask?.cancel()
+        previewTask = nil
+        previewGeneration = UUID()
         if let temp = previewTempDirectory {
             try? FileManager.default.removeItem(at: temp)
             previewTempDirectory = nil

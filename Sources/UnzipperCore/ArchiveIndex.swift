@@ -49,8 +49,8 @@ public struct ArchiveIndex: Sendable {
             }
 
             for ancestor in ArchivePath.ancestors(of: entry.path) {
-                folderSizes[ancestor, default: 0] += entry.size
                 if !entry.isDirectory {
+                    folderSizes[ancestor, default: 0] += entry.size
                     folderFileCounts[ancestor, default: 0] += 1
                 }
             }
