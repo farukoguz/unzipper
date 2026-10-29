@@ -1,29 +1,20 @@
 # Unzipper
 
-A fast, native macOS archive utility with a WinRAR-style browser. Open an
-archive, navigate its folders, preview entries, extract what you need, or create
-new archives — all with a keyboard-friendly SwiftUI interface and no external
-dependencies.
+A fast, native macOS archive utility with a WinRAR-style browser. Browse archive
+folders, preview entries, extract selections, and create archives in a
+keyboard-friendly SwiftUI app. No external dependencies — everything goes through
+the system `libarchive`.
+
+Requires **macOS 14 or newer**.
 
 ## Features
 
-- **Browse before extracting** — folder tree, breadcrumbs, sortable columns
-  (name, size, packed size, ratio, modified date), and instant search across the
-  whole archive.
-- **Extract everything or just a selection** — double-click folders to navigate,
-  ⌘E to extract all, ⇧⌘E for the selection. Encrypted ZIPs prompt for a password.
-- **Quick Look** — ⌘Y extracts a single entry to a temporary folder and previews
-  it with the native Quick Look panel.
-- **Create archives** — ZIP, 7Z, and TAR.GZ with Store/Fast/Normal/Maximum
-  compression. Drag files or folders onto the window, or use *New Archive…*.
-- **Fast, native pipeline** — batch extraction/creation on background tasks with
-  live progress, throughput, ETA, and cancellation. No helper processes or
-  Finder round-trips.
-- **Security first** — paths are normalized (`..` and absolute paths removed),
-  symlink traversal is blocked, and existing files are only replaced when
-  *Overwrite* is on.
-- **Small touches** — drag-and-drop opening, recent archives, Finder reveal,
-  archive document types, and a generated app icon.
+- Folder tree, breadcrumbs, sortable columns, and instant search.
+- Extract everything or a selection; encrypted ZIPs prompt for a password.
+- Quick Look previews without extracting the whole archive.
+- Create ZIP, 7Z, and TAR.GZ archives with adjustable compression.
+- Background jobs with progress, throughput, ETA, and cancellation.
+- Path normalization, blocked symlink traversal, and opt-in overwrite.
 
 ## Supported formats
 
@@ -36,89 +27,46 @@ dependencies.
 | RAR (v4/v5) | ✅ | — |
 | CAB, ISO | ✅ | — |
 
-Reading is provided by the system `libarchive`; RAR creation is intentionally not
-supported.
-
 ## Install
 
-Download **Unzipper** from
-[Releases](https://github.com/farukoguz/unzipper/releases) and open the disk image.
+Download the latest [release](https://github.com/farukoguz/unzipper/releases),
+verify the image, then drag **Unzipper** onto the **Applications** shortcut:
 
-1. Check the image before opening it — the build is not notarised, so macOS has no
-   way to tell you whether what you downloaded is what was published:
+```sh
+shasum -a 256 -c Unzipper-*.dmg.sha256
+```
 
-   ```sh
-   shasum -a 256 -c Unzipper-*.dmg.sha256   # run in ~/Downloads
-   ```
+The build is ad-hoc signed, not notarised, so clear the quarantine flag before
+launching:
 
-   The filename has to match the checksum exactly. A mismatch means the download
-   is truncated or altered — do not open it. The `.sha256` file sits next to the
-   image on the release page.
-2. Drag **Unzipper** onto the **Applications** shortcut, then eject the disk.
-3. Clear the quarantine flag. macOS refuses this unnotarised build before
-   anything inside it gets a chance to run:
+```sh
+xattr -cr /Applications/Unzipper.app
+```
 
-   ```sh
-   /usr/bin/xattr -cr /Applications/Unzipper.app
-   ```
+Alternatively, open the app once, dismiss the warning, then allow it in
+**System Settings → Privacy & Security → Open Anyway**.
 
-   Then launch Unzipper normally.
+## Build and test
 
-   This removes macOS's record of where the app came from, so it can no longer
-   warn you about an unnotarised build. Only run it on an app you built yourself
-   or checked against the release checksum.
+Building needs the Xcode Command Line Tools. Running the XCTest suite needs a
+full Xcode install.
 
-   Prefer the mouse? Try to open Unzipper once, click **Done** on the warning,
-   then go to System Settings → Privacy & Security and click **Open Anyway** next
-   to the message about Unzipper. (On macOS 14, right-click → **Open** also works;
-   macOS 15 and later removed that shortcut.)
-
-Requires **macOS 14 (Sonoma) or newer**.
-
-## Build and run
-
-Building needs the Xcode Command Line Tools (`xcode-select --install`), but no
-Homebrew packages and no Xcode project.
-
-```bash
-./build.sh                     # release build for this Mac + dist/Unzipper.app
-./build.sh debug               # debug build
-./build.sh release --universal # arm64 + x86_64 for distribution
+```sh
+./build.sh                      # release build for this Mac
+./build.sh debug                # debug build
+./build.sh release --universal  # arm64 + x86_64
 open dist/Unzipper.app
-```
 
-Run the test suite with:
-
-```bash
-swift test                     # 59 tests: core models, ZIP parsing, round trips
-```
-
-The tests use XCTest, which ships with full Xcode rather than the standalone
-Command Line Tools. If `xcode-select -p` points at `/Library/Developer/CommandLineTools`,
-either select Xcode once with `sudo xcode-select -s /Applications/Xcode.app` or run:
-
-```bash
+swift test
+# If xcode-select points at the Command Line Tools:
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+
+Scripts/make-dmg.sh             # dist/Unzipper-<version>.dmg + .sha256
 ```
 
-CI runs `swift build` and `swift test` on every push to `main` and every pull
-request.
+CI runs `swift build` and `swift test` on every pull request and push to `main`.
 
-`build.sh` compiles the SwiftPM product, assembles the `.app` bundle, copies the
-icon and `Info.plist`, and ad-hoc signs the result. To produce the release disk
-image and checksum:
-
-```bash
-Scripts/make-dmg.sh            # dist/Unzipper-<version>.dmg + .sha256
-```
-
-To regenerate the icon:
-
-```bash
-swift Tools/GenerateIcon.swift Resources
-```
-
-## Usage
+## Shortcuts
 
 | Action | Shortcut |
 |---|---|
@@ -132,40 +80,13 @@ swift Tools/GenerateIcon.swift Resources
 | Open selected item | ↩ |
 | Close archive | ⇧⌘W |
 
-You can also drop an archive on the window to open it, or drop files/folders to
-start a new archive. The archive table supports the usual multi-selection,
-sorting by clicking column headers, and right-click actions.
+## Limitations
 
-## Project layout
-
-```
-Sources/
-  CSArchive/        C shim over libarchive (list, extract, create)
-  UnzipperCore/     Pure models and services:
-                    ArchiveIndex/ArchiveBrowser (browsing), ArchivePath,
-                    RecentArchives, Formatting, ArchiveFileTypes,
-                    ZipMetadata (packed sizes), CreationPlanner,
-                    ArchiveService (async list/extract/create)
-  Unzipper/         SwiftUI app (browser, sheets, jobs, Quick Look)
-Tests/
-  UnzipperCoreTests/ XCTest suite for core models and round trips
-Tools/
-  GenerateIcon.swift
-```
-
-## Notes and limitations
-
-- Extraction and creation run against the system `libarchive`; the exact list of
-  readable formats depends on the macOS version.
-- Archives with encrypted *headers* (rather than encrypted entries) cannot be
-  listed without a password, because listing happens before the password prompt.
-- Compressed single files (for example `notes.txt.gz` created with `gzip`) are
-  not browsable; use tar-based `.tar.gz`/`.tgz` archives instead.
-- The app is ad-hoc signed for local use. If you distribute it, sign with a
-  Developer ID certificate and notarize it to satisfy Gatekeeper.
-- Local builds target the host architecture by default. The published release is
-  universal: `./build.sh release --universal` builds both slices and combines
-  them with `lipo`.
+- Readable formats depend on the `libarchive` shipped with macOS.
+- Archives with encrypted headers cannot be listed without a password.
+- Single compressed files such as `notes.txt.gz` are not browsable; use
+  `.tar.gz`/`.tgz` instead.
+- Distribution outside local use needs a Developer ID signature and notarisation.
 
 ## License
 
