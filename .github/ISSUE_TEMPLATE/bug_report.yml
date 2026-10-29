@@ -18,7 +18,7 @@ body:
     attributes:
       label: Unzipper version
       description: Shown in Unzipper → About Unzipper, or in the disk image filename.
-      placeholder: "1.0.1"
+      placeholder: "1.0.2"
     validations:
       required: true
   - type: input
