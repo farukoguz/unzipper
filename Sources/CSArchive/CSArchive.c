@@ -1,4 +1,5 @@
 #include "include/CSArchive.h"
+#include "LZ4Frame.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -243,11 +244,28 @@ static int emit_progress(UZProgress progress,
                              entries_done, entries_total);
 }
 
+static char *make_lz4_temp_path(void) {
+    const char *tmp = getenv("TMPDIR");
+    if (!tmp || !*tmp) tmp = "/tmp";
+    size_t length = strlen(tmp) + 32;
+    char *path = malloc(length);
+    if (!path) return NULL;
+    snprintf(path, length, "%s%sUnzipperLZ4XXXXXX", tmp,
+             tmp[strlen(tmp) - 1] == '/' ? "" : "/");
+    int fd = mkstemp(path);
+    if (fd < 0) {
+        free(path);
+        return NULL;
+    }
+    close(fd);
+    return path;
+}
+
 /* ------------------------------------------------------------------ */
 /* Listing                                                             */
 /* ------------------------------------------------------------------ */
 
-int uz_list(const char *path,
+static int uz_list_impl(const char *path,
             UZEntry **out_entries,
             int *out_count,
             char **out_format,
@@ -358,6 +376,47 @@ int uz_list(const char *path,
     return UZ_OK;
 }
 
+int uz_list(const char *path,
+            UZEntry **out_entries,
+            int *out_count,
+            char **out_format,
+            char **out_filter,
+            char **error) {
+    if (error) *error = NULL;
+    if (out_entries) *out_entries = NULL;
+    if (out_count) *out_count = 0;
+    if (out_format) *out_format = NULL;
+    if (out_filter) *out_filter = NULL;
+    if (!path || !out_entries || !out_count) {
+        set_error(error, "Invalid arguments.");
+        return UZ_ERR;
+    }
+    if (!uz_lz4_is_frame(path)) {
+        return uz_list_impl(path, out_entries, out_count, out_format, out_filter, error);
+    }
+
+    char *temporary = make_lz4_temp_path();
+    if (!temporary) {
+        set_error(error, "Could not prepare the LZ4 archive.");
+        return UZ_ERR;
+    }
+    if (uz_lz4_decompress_file(path, temporary, error) != 0) {
+        unlink(temporary);
+        free(temporary);
+        return UZ_ERR;
+    }
+
+    int result = uz_list_impl(temporary, out_entries, out_count,
+                              out_format, out_filter, error);
+    if (result == UZ_OK && out_filter) {
+        if (*out_filter) uz_free_string(*out_filter);
+        *out_filter = dup_string("lz4");
+    }
+    unlink(temporary);
+    free(temporary);
+    return result;
+}
+
 void uz_free_entries(UZEntry *entries, int count) {
     if (!entries) return;
     for (int i = 0; i < count; i++) {
@@ -371,7 +430,7 @@ void uz_free_entries(UZEntry *entries, int count) {
 /* Extraction                                                          */
 /* ------------------------------------------------------------------ */
 
-int uz_extract(const char *archive_path,
+static int uz_extract_impl(const char *archive_path,
                const char *dest_dir,
                const int *indices,
                int index_count,
@@ -608,6 +667,46 @@ int uz_extract(const char *archive_path,
     return UZ_OK;
 }
 
+int uz_extract(const char *archive_path,
+               const char *dest_dir,
+               const int *indices,
+               int index_count,
+               int total_entries,
+               const char *password,
+               int overwrite,
+               long long total_bytes,
+               UZProgress progress,
+               char **error) {
+    if (error) *error = NULL;
+    if (!archive_path || !dest_dir) {
+        set_error(error, "Invalid arguments.");
+        return UZ_ERR;
+    }
+    if (!uz_lz4_is_frame(archive_path)) {
+        return uz_extract_impl(archive_path, dest_dir, indices, index_count,
+                               total_entries, password, overwrite, total_bytes,
+                               progress, error);
+    }
+
+    char *temporary = make_lz4_temp_path();
+    if (!temporary) {
+        set_error(error, "Could not prepare the LZ4 archive.");
+        return UZ_ERR;
+    }
+    if (uz_lz4_decompress_file(archive_path, temporary, error) != 0) {
+        unlink(temporary);
+        free(temporary);
+        return UZ_ERR;
+    }
+
+    int result = uz_extract_impl(temporary, dest_dir, indices, index_count,
+                                 total_entries, password, overwrite, total_bytes,
+                                 progress, error);
+    unlink(temporary);
+    free(temporary);
+    return result;
+}
+
 /* ------------------------------------------------------------------ */
 /* Creation                                                            */
 /* ------------------------------------------------------------------ */
@@ -615,6 +714,9 @@ int uz_extract(const char *archive_path,
 struct UZWriter {
     struct archive *a;
     char *path;
+    char *tar_path; /* intermediate tar file for formats compressed after writing */
+    int lz4;
+    int store_only;
     long long done;
     long long total;
     int entries_done;
@@ -639,6 +741,10 @@ static void configure_format(struct archive *a, const char *format, int level) {
         archive_write_set_format_pax_restricted(a);
         archive_write_add_filter_gzip(a);
         archive_write_set_filter_option(a, "gzip", "compression-level", level_string);
+    } else if (strcmp(format, "tar.lz4") == 0) {
+        /* libarchive's LZ4 filter shells out to the lz4 command, so the tar
+           stream is written first and compressed by our own encoder. */
+        archive_write_set_format_pax_restricted(a);
     } else if (strcmp(format, "tar.bz2") == 0) {
         archive_write_set_format_pax_restricted(a);
         archive_write_add_filter_bzip2(a);
@@ -678,8 +784,24 @@ UZWriter *uz_writer_open(const char *archive_path,
     if (level > 9) level = 9;
     configure_format(a, format, level);
 
-    if (archive_write_open_filename(a, archive_path) != ARCHIVE_OK) {
+    int lz4 = strcmp(format, "tar.lz4") == 0;
+    char *tar_path = NULL;
+    const char *open_path = archive_path;
+    if (lz4) {
+        size_t length = strlen(archive_path) + 5;
+        tar_path = malloc(length);
+        if (!tar_path) {
+            set_error(error, "Out of memory.");
+            archive_write_free(a);
+            return NULL;
+        }
+        snprintf(tar_path, length, "%s.tar", archive_path);
+        open_path = tar_path;
+    }
+
+    if (archive_write_open_filename(a, open_path) != ARCHIVE_OK) {
         set_error(error, "%s", archive_error_string(a) ?: "Could not create archive.");
+        free(tar_path);
         archive_write_free(a);
         return NULL;
     }
@@ -690,10 +812,17 @@ UZWriter *uz_writer_open(const char *archive_path,
         archive_write_close(a);
         archive_write_free(a);
         unlink(archive_path);
+        if (tar_path) {
+            unlink(tar_path);
+            free(tar_path);
+        }
         return NULL;
     }
     writer->a = a;
     writer->path = dup_string(archive_path);
+    writer->tar_path = tar_path;
+    writer->lz4 = lz4;
+    writer->store_only = (level == 0);
     writer->total = total_bytes;
     writer->entries_total = total_entries;
     writer->progress = progress;
@@ -880,8 +1009,26 @@ int uz_writer_close(UZWriter *writer, char **error) {
         set_error(error, "%s", archive_error_string(writer->a) ?: "Could not finish archive.");
     }
     archive_write_free(writer->a);
+    writer->a = NULL;
     int failed = (rc < ARCHIVE_WARN);
+
+    if (!failed && writer->lz4) {
+        char *compression_error = NULL;
+        if (uz_lz4_compress_file(writer->tar_path, writer->path,
+                                 writer->store_only, &compression_error) != 0) {
+            set_error(error, "%s", compression_error
+                      ? compression_error
+                      : "Could not compress the archive.");
+            free(compression_error);
+            failed = 1;
+        }
+    }
+
     if (failed && writer->path) unlink(writer->path);
+    if (writer->tar_path) {
+        unlink(writer->tar_path);
+        free(writer->tar_path);
+    }
     free(writer->path);
     free(writer);
     return failed ? UZ_ERR : UZ_OK;
@@ -892,6 +1039,10 @@ void uz_writer_abort(UZWriter *writer) {
     archive_write_close(writer->a);
     archive_write_free(writer->a);
     if (writer->path) unlink(writer->path);
+    if (writer->tar_path) {
+        unlink(writer->tar_path);
+        free(writer->tar_path);
+    }
     free(writer->path);
     free(writer);
 }

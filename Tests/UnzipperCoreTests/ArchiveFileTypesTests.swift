@@ -4,7 +4,7 @@ import XCTest
 final class ArchiveFileTypesTests: XCTestCase {
     func testSupportedExtensions() {
         let supported = ["zip", "zipx", "rar", "7z", "tar", "gz", "tgz", "bz2",
-                         "tbz", "tbz2", "xz", "txz", "cab", "iso", "jar"]
+                         "tbz", "tbz2", "xz", "txz", "lz4", "tlz4", "cab", "iso", "jar"]
         for ext in supported {
             XCTAssertTrue(ArchiveFileTypes.isArchive(URL(fileURLWithPath: "/tmp/file.\(ext)")), ext)
         }

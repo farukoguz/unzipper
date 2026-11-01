@@ -390,6 +390,80 @@ final class ArchiveServiceTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: soft.path), "target.txt")
     }
 
+    func testCreatedTarLz4UsesLZ4Frame() async throws {
+        let directory = try makeTemporaryDirectory()
+        let source = try makePayload(in: directory)
+        let archive = directory.appendingPathComponent("created.tar.lz4")
+        _ = try await ArchiveService.create(
+            CreationRequest(destination: archive,
+                            items: [source],
+                            format: .tarLz4,
+                            compressionLevel: 6),
+            cancelFlag: CancelFlag(),
+            progress: { _ in })
+
+        let data = try Data(contentsOf: archive)
+        XCTAssertEqual(Array(data.prefix(4)), [0x04, 0x22, 0x4D, 0x18])
+
+        let listing = try await ArchiveService.list(url: archive)
+        XCTAssertEqual(listing.filterName, "lz4")
+        XCTAssertTrue(listing.entries.contains { $0.path == "payload/hello.txt" })
+    }
+
+    func testLinkedLz4FrameWithCrossBlockMatches() async throws {
+        let directory = try makeTemporaryDirectory()
+        let tar = try makeTar(in: directory) { staging in
+            try TestSupport.write("linked lz4 payload",
+                                  to: staging.appendingPathComponent("linked.txt"))
+        }
+        let tarData = try Data(contentsOf: tar)
+
+        // Split at the end of the tar's data so the second block can reference
+        // the zero padding through an LZ4 match in the previous block.
+        let lastNonZero = try XCTUnwrap(tarData.lastIndex { $0 != 0 })
+        let prefixLength = lastNonZero + 2
+        XCTAssertLessThan(prefixLength, tarData.count)
+        let prefix = Data(tarData.prefix(prefixLength))
+        let suffixLength = tarData.count - prefixLength
+        XCTAssertGreaterThanOrEqual(suffixLength, 19)
+        XCTAssertTrue(tarData.suffix(suffixLength).allSatisfy { $0 == 0 })
+
+        var matchBlock = Data([0x0F, 0x01, 0x00]) // 0 literals, offset 1, length 19
+        var remaining = suffixLength - 19
+        while remaining >= 255 {
+            matchBlock.append(255)
+            remaining -= 255
+        }
+        matchBlock.append(UInt8(remaining))
+
+        let frame = TestSupport.lz4Frame(rawBlocks: [
+            TestSupport.lz4LiteralBlock(prefix),
+            matchBlock
+        ], content: tarData, linked: true)
+
+        let archive = directory.appendingPathComponent("linked.tar.lz4")
+        try frame.write(to: archive)
+
+        let listing = try await ArchiveService.list(url: archive)
+        XCTAssertEqual(listing.filterName, "lz4")
+        XCTAssertEqual(listing.entries.first?.path, "linked.txt")
+
+        let destination = directory.appendingPathComponent("linked-out")
+        try await ArchiveService.extract(
+            ExtractionRequest(archiveURL: archive,
+                              destination: destination,
+                              entryIndices: listing.entries.map(\.id),
+                              totalEntries: listing.entries.count,
+                              password: nil,
+                              overwrite: true,
+                              totalBytes: listing.totalSize),
+            cancelFlag: CancelFlag(),
+            progress: { _ in })
+
+        XCTAssertEqual(try read(destination.appendingPathComponent("linked.txt")),
+                       "linked lz4 payload")
+    }
+
     // MARK: - Helpers
 
     private func temporaryFiles(in directory: URL) throws -> [String] {
