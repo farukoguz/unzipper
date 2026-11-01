@@ -40,11 +40,14 @@ final class ArchiveTypesTests: XCTestCase {
         XCTAssertEqual(ArchiveFormat.zip.identifier, "zip")
         XCTAssertEqual(ArchiveFormat.sevenZip.identifier, "7z")
         XCTAssertEqual(ArchiveFormat.tarGz.identifier, "tar.gz")
+        XCTAssertEqual(ArchiveFormat.tarLz4.identifier, "tar.lz4")
         XCTAssertEqual(ArchiveFormat.zip.displayName, "ZIP")
         XCTAssertEqual(ArchiveFormat.sevenZip.displayName, "7Z")
         XCTAssertEqual(ArchiveFormat.tarGz.displayName, "TAR.GZ")
+        XCTAssertEqual(ArchiveFormat.tarLz4.displayName, "TAR.LZ4")
         XCTAssertEqual(ArchiveFormat.zip.fileExtension, "zip")
-        XCTAssertEqual(ArchiveFormat.allCases.count, 3)
+        XCTAssertEqual(ArchiveFormat.tarLz4.fileExtension, "tar.lz4")
+        XCTAssertEqual(ArchiveFormat.allCases.count, 4)
     }
 
     func testListingDisplayFormat() {

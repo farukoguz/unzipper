@@ -2,8 +2,8 @@
 
 A fast, native macOS archive utility with a WinRAR-style browser. Browse archive
 folders, preview entries, extract selections, and create archives in a
-keyboard-friendly SwiftUI app. No external dependencies — everything goes through
-the system `libarchive`.
+keyboard-friendly SwiftUI app. No external dependencies — archive handling goes
+through the system `libarchive` and Compression frameworks.
 
 Requires **macOS 14 or newer**.
 
@@ -12,7 +12,7 @@ Requires **macOS 14 or newer**.
 - Folder tree, breadcrumbs, sortable columns, and instant search.
 - Extract everything or a selection; encrypted ZIPs prompt for a password.
 - Quick Look previews without extracting the whole archive.
-- Create ZIP, 7Z, and TAR.GZ archives with adjustable compression.
+- Create ZIP, 7Z, TAR.GZ, and TAR.LZ4 archives with adjustable compression.
 - Background jobs with progress, throughput, ETA, and cancellation.
 - Path normalization, blocked symlink traversal, and opt-in overwrite.
 
@@ -22,8 +22,8 @@ Requires **macOS 14 or newer**.
 |---|---|---|
 | ZIP / ZIPX / JAR | ✅ | ✅ |
 | 7Z | ✅ | ✅ |
-| TAR, TAR.GZ, TAR.BZ2, TAR.XZ | ✅ | TAR.GZ |
-| GZIP, BZIP2, XZ | ✅ | — |
+| TAR, TAR.GZ, TAR.BZ2, TAR.XZ, TAR.LZ4 | ✅ | TAR.GZ, TAR.LZ4 |
+| GZIP, BZIP2, XZ, LZ4 | ✅ | — |
 | RAR (v4/v5) | ✅ | — |
 | CAB, ISO | ✅ | — |
 
@@ -84,8 +84,8 @@ CI runs `swift build` and `swift test` on every pull request and push to `main`.
 
 - Readable formats depend on the `libarchive` shipped with macOS.
 - Archives with encrypted headers cannot be listed without a password.
-- Single compressed files such as `notes.txt.gz` are not browsable; use
-  `.tar.gz`/`.tgz` instead.
+- Single compressed files such as `notes.txt.gz` or `notes.txt.lz4` are not
+  browsable; use `.tar.gz` or `.tar.lz4` instead.
 - Distribution outside local use needs a Developer ID signature and notarisation.
 
 ## License

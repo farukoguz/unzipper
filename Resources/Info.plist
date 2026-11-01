@@ -57,6 +57,8 @@
                 <string>tbz2</string>
                 <string>xz</string>
                 <string>txz</string>
+                <string>lz4</string>
+                <string>tlz4</string>
                 <string>cab</string>
                 <string>iso</string>
                 <string>jar</string>

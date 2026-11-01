@@ -112,12 +112,14 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
     case zip
     case sevenZip
     case tarGz
+    case tarLz4
 
     public var identifier: String {
         switch self {
         case .zip: return "zip"
         case .sevenZip: return "7z"
         case .tarGz: return "tar.gz"
+        case .tarLz4: return "tar.lz4"
         }
     }
 
@@ -126,6 +128,7 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
         case .zip: return "ZIP"
         case .sevenZip: return "7Z"
         case .tarGz: return "TAR.GZ"
+        case .tarLz4: return "TAR.LZ4"
         }
     }
 
@@ -134,6 +137,7 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
         case .zip: return "zip"
         case .sevenZip: return "7z"
         case .tarGz: return "tar.gz"
+        case .tarLz4: return "tar.lz4"
         }
     }
 }

@@ -23,7 +23,7 @@ struct ExtractSheet: View {
 
     private static func stem(for name: String) -> String {
         let lowered = name.lowercased()
-        for suffix in [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".zipx"] {
+        for suffix in [".tar.gz", ".tar.lz4", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".zipx"] {
             if lowered.hasSuffix(suffix) {
                 return String(name.dropLast(suffix.count))
             }

@@ -195,7 +195,7 @@ struct CreateArchiveSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 250)
+                    .frame(width: 360)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -269,7 +269,7 @@ struct CreateArchiveSheet: View {
     private var cleanedName: String {
         var result = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = result.lowercased()
-        for suffix in [".tar.gz", ".tar.bz2", ".tar.xz", ".zip", ".7z", ".tgz", ".tbz2", ".txz"] {
+        for suffix in [".tar.gz", ".tar.lz4", ".tar.bz2", ".tar.xz", ".zip", ".7z", ".tgz", ".tbz2", ".txz"] {
             if lowered.hasSuffix(suffix) {
                 result = String(result.dropLast(suffix.count))
                 break

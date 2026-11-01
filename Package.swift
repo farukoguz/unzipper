@@ -8,7 +8,10 @@ let package = Package(
         .target(
             name: "CSArchive",
             path: "Sources/CSArchive",
-            linkerSettings: [.linkedLibrary("archive")]
+            linkerSettings: [
+                .linkedLibrary("archive"),
+                .linkedLibrary("compression")
+            ]
         ),
         .target(
             name: "UnzipperCore",
