@@ -1,20 +1,16 @@
 # Unzipper
 
-A fast, native macOS archive utility with a WinRAR-style browser. Browse archive
-folders, preview entries, extract selections, and create archives in a
-keyboard-friendly SwiftUI app. No external dependencies — archive handling goes
-through the system `libarchive` and Compression frameworks.
+A fast, native macOS archive browser and extractor built with SwiftUI. No
+external dependencies; archive handling uses the system frameworks.
 
 Requires **macOS 14 or newer**.
 
 ## Features
 
-- Folder tree, breadcrumbs, sortable columns, and instant search.
+- Browse, search, Quick Look preview, and extract archives.
 - Extract everything or a selection; encrypted ZIPs prompt for a password.
-- Quick Look previews without extracting the whole archive.
 - Create ZIP, 7Z, TAR.GZ, and TAR.LZ4 archives with adjustable compression.
 - Background jobs with progress, throughput, ETA, and cancellation.
-- Path normalization, blocked symlink traversal, and opt-in overwrite.
 
 ## Supported formats
 
@@ -30,63 +26,32 @@ Requires **macOS 14 or newer**.
 ## Install
 
 Download the latest [release](https://github.com/farukoguz/unzipper/releases),
-verify the image, then drag **Unzipper** onto the **Applications** shortcut:
+verify it, and drag **Unzipper** onto the **Applications** shortcut:
 
 ```sh
 shasum -a 256 -c Unzipper-*.dmg.sha256
-```
-
-The build is ad-hoc signed, not notarised, so clear the quarantine flag before
-launching:
-
-```sh
 xattr -cr /Applications/Unzipper.app
 ```
 
-Alternatively, open the app once, dismiss the warning, then allow it in
+The build is ad-hoc signed and not notarised. If macOS blocks it, allow it in
 **System Settings → Privacy & Security → Open Anyway**.
 
-## Build and test
+## Build
 
-Building needs the Xcode Command Line Tools. Running the XCTest suite needs a
-full Xcode install.
+Requires the Xcode Command Line Tools; running tests requires full Xcode.
 
 ```sh
-./build.sh                      # release build for this Mac
-./build.sh debug                # debug build
-./build.sh release --universal  # arm64 + x86_64
-open dist/Unzipper.app
-
+./build.sh
+./build.sh release --universal
 swift test
-# If xcode-select points at the Command Line Tools:
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
-
-Scripts/make-dmg.sh             # dist/Unzipper-<version>.dmg + .sha256
+Scripts/make-dmg.sh
 ```
-
-CI runs `swift build` and `swift test` on every pull request and push to `main`.
-
-## Shortcuts
-
-| Action | Shortcut |
-|---|---|
-| Open archive | ⌘O |
-| New archive | ⌘N |
-| Extract all | ⌘E |
-| Extract selected | ⇧⌘E |
-| Quick Look | ⌘Y |
-| Search | ⌘F |
-| Enclosing folder | ⌘↑ / ⌫ |
-| Open selected item | ↩ |
-| Close archive | ⇧⌘W |
 
 ## Limitations
 
-- Readable formats depend on the `libarchive` shipped with macOS.
-- Archives with encrypted headers cannot be listed without a password.
+- Encrypted archives cannot be listed without a password.
 - Single compressed files such as `notes.txt.gz` or `notes.txt.lz4` are not
-  browsable; use `.tar.gz` or `.tar.lz4` instead.
-- Distribution outside local use needs a Developer ID signature and notarisation.
+  browsable; use the tar variants instead.
 
 ## License
 
